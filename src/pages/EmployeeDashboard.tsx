@@ -1,52 +1,45 @@
-// src/pages/EmployeeDashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import axios from 'axios';
+import api from '../services/api';
 import './EmployeeDashboard.css';
 
 const EmployeeDashboard: React.FC = () => {
-  const [agents, setAgents] = useState([]);
+  const [agents, setAgents] = useState<any[]>([]);
   const [newAgent, setNewAgent] = useState({ name: '', email: '', password: '' });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const token = localStorage.getItem('token');
   const navigate = useNavigate();
   const location = useLocation();
 
+  const fetchAgents = async () => {
+    try {
+      const response = await api.get('/users/');
+      setAgents(response.data);
+    } catch (err) {
+      setError('Failed to fetch agents');
+      navigate('/login');
+    }
+  };
+
   useEffect(() => {
+    const token = localStorage.getItem('access');
     if (!token) {
       navigate('/login');
       return;
     }
-    const fetchAgents = async () => {
-      try {
-        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/users/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        setAgents(response.data);
-      } catch (err) {
-        setError('Failed to fetch agents');
-        navigate('/login');
-      }
-    };
     fetchAgents();
-  }, [token, navigate]);
+  }, [navigate]);
 
   const handleCreateAgent = async (e: React.FormEvent) => {
     e.preventDefault();
     const data = { ...newAgent };
-    if (data.password === '') {
+    if (!data.password) {
       data.password = Math.random().toString(36).slice(-8);
     }
     try {
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/users/`, data, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.post('/users/', data);
       setNewAgent({ name: '', email: '', password: '' });
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/users/`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setAgents(response.data);
+      fetchAgents();
       setMessage('Agent created successfully!');
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
@@ -57,10 +50,8 @@ const EmployeeDashboard: React.FC = () => {
 
   const handleResetPassword = async (agentId: string) => {
     try {
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/users/reset-password/`, { user_id: agentId }, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setMessage('Password reset request sent (stubbed)');
+      await api.post('/reset-password/', { user_id: agentId });
+      setMessage('Password reset request sent');
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       setError('Error resetting password');
@@ -73,19 +64,119 @@ const EmployeeDashboard: React.FC = () => {
     navigate('/login');
   };
 
-  const getActiveLink = (path: string) => location.pathname === path ? 'active' : '';
-
-  if (!token) return null;
+  const getActiveLink = (path: string) => (location.pathname === path ? 'active' : '');
 
   return (
     <div className="dashboard-container">
       <aside className="sidebar">
         <ul>
-          <li><a href="/dashboard" onClick={(e) => { e.preventDefault(); navigate('/dashboard'); }} className={getActiveLink('/dashboard')}>RAU Admin</a></li>
-          <li><a href="/dashboard" onClick={(e) => { e.preventDefault(); navigate('/dashboard'); }} className={getActiveLink('/dashboard')}>Employees</a></li>
-          <li><a href="/leads" onClick={(e) => { e.preventDefault(); navigate('/leads'); }} className={getActiveLink('/leads')}>Live Lead System</a></li>
-          <li><a href="/data-source" onClick={(e) => { e.preventDefault(); navigate('/data-source'); }} className={getActiveLink('/data-source')}>Data Source</a></li>
-          <li><a href="#" onClick={(e) => { e.preventDefault(); handleLogout(); }}>Logout</a></li>
+          <li>
+            <a
+              href="/dashboard"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/dashboard');
+              }}
+              className={getActiveLink('/dashboard')}
+            >
+              Dashboard
+            </a>
+          </li>
+          <li>
+            <a
+              href="/users"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/users');
+              }}
+              className={getActiveLink('/users')}
+            >
+              User Management
+            </a>
+          </li>
+          <li>
+            <a
+              href="/leads"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/leads');
+              }}
+              className={getActiveLink('/leads')}
+            >
+              Leads
+            </a>
+          </li>
+          <li>
+            <a
+              href="/lead-queue"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/lead-queue');
+              }}
+              className={getActiveLink('/lead-queue')}
+            >
+              Lead Queue
+            </a>
+          </li>
+          <li>
+            <a
+              href="/disposition"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/disposition');
+              }}
+              className={getActiveLink('/disposition')}
+            >
+              Lead Disposition
+            </a>
+          </li>
+          <li>
+            <a
+              href="/data-source"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/data-source');
+              }}
+              className={getActiveLink('/data-source')}
+            >
+              Data Source
+            </a>
+          </li>
+          <li>
+            <a
+              href="/availability"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/availability');
+              }}
+              className={getActiveLink('/availability')}
+            >
+              Availability
+            </a>
+          </li>
+          <li>
+            <a
+              href="/appointments"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/appointments');
+              }}
+              className={getActiveLink('/appointments')}
+            >
+              Appointments
+            </a>
+          </li>
+          <li>
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                handleLogout();
+              }}
+            >
+              Logout
+            </a>
+          </li>
         </ul>
       </aside>
       <main className="main-content">
@@ -130,7 +221,9 @@ const EmployeeDashboard: React.FC = () => {
                 <td>{agent.email || 'N/A'}</td>
                 <td>{agent.status || 'Active'}</td>
                 <td>{agent.last_login || 'N/A'}</td>
-                <td><button onClick={() => handleResetPassword(agent.id)}>Reset</button></td>
+                <td>
+                  <button onClick={() => handleResetPassword(agent.id)}>Reset</button>
+                </td>
               </tr>
             ))}
           </tbody>

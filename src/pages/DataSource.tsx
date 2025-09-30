@@ -1,6 +1,6 @@
-// src/pages/DataSource.tsx
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import api from '../services/api';
+import { useNavigate } from 'react-router-dom';
 import './DataSource.css';
 
 const DataSource: React.FC = () => {
@@ -8,16 +8,18 @@ const DataSource: React.FC = () => {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('access');
+  const navigate = useNavigate();
 
   useEffect(() => {
-    if (!token) window.location.href = '/login';
+    if (!token) {
+      navigate('/login');
+      return;
+    }
     const fetchConfig = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/sheet-config/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await api.get('/sheet-config/');
         setConfig(response.data);
       } catch (err) {
         setError('Failed to fetch config');
@@ -26,7 +28,7 @@ const DataSource: React.FC = () => {
       }
     };
     fetchConfig();
-  }, [token]);
+  }, [token, navigate]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,9 +38,7 @@ const DataSource: React.FC = () => {
     }
     try {
       setLoading(true);
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/sheet-config/`, config, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.post('/sheet-config/', config);
       setMessage('Config saved successfully!');
       setTimeout(() => setMessage(''), 3000);
     } catch (err) {
