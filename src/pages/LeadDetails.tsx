@@ -5,64 +5,145 @@ import './LeadDetails.css';
 
 const LeadDetails: React.FC = () => {
   const [lead, setLead] = useState<any>(null);
-  const [queue, setQueue] = useState(0);
-  const [showPopup, setShowPopup] = useState(false);
+  const [queueCount, setQueueCount] = useState(0);
+  const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showCallBackModal, setShowCallBackModal] = useState(false);
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const token = localStorage.getItem('access');
+  
+  // Booking form data
+  const [appointmentDate, setAppointmentDate] = useState('');
+  const [appointmentTime, setAppointmentTime] = useState('');
+  const [appointmentNotes, setAppointmentNotes] = useState('');
+  
+  // Call back form data
+  const [callBackDate, setCallBackDate] = useState('');
+  const [callBackTime, setCallBackTime] = useState('');
+  
   const navigate = useNavigate();
+  const agentName = localStorage.getItem('name') || 'Agent';
+
+  // Fetch next lead
+  const fetchNextLead = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const response = await api.get('/leads/next/');
+      setLead(response.data.lead);
+      setQueueCount(response.data.queue_count || 0);
+    } catch (err: any) {
+      if (err.response?.status === 404) {
+        setLead(null);
+        setQueueCount(0);
+      } else if (err.response?.status === 401) {
+        navigate('/login');
+      } else {
+        setError('Failed to load lead');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
+    const token = localStorage.getItem('access');
     if (!token) {
       navigate('/login');
       return;
     }
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const [leadResponse, queueResponse] = await Promise.all([
-          api.get('/leads/queue/'), // Changed from /leads/next/
-          api.get('/leads/queue/'),
-        ]);
-        setLead(leadResponse.data[0] || null); // Assuming first lead in queue
-        setQueue(queueResponse.data.length);
-      } catch (err) {
-        setError('Failed to load lead data');
-        navigate('/login');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [token, navigate]);
+    fetchNextLead();
+  }, [navigate]);
 
-  const handleDisposition = async (disposition: string, extraData: any = {}) => {
-    if (lead) {
-      try {
-        await api.post('/leads/disposition/', {
-          lead_id: lead.id, // Changed from row_index to lead_id
-          status: disposition, // Changed to match DispositionView
-          extra_data: extraData,
-        });
-        const [leadResponse, queueResponse] = await Promise.all([
-          api.get('/leads/queue/'),
-          api.get('/leads/queue/'),
-        ]);
-        setLead(leadResponse.data[0] || null);
-        setQueue(queueResponse.data.length);
-        if (disposition === 'BOOK') setShowPopup(true);
-      } catch (err) {
-        setError('Disposition failed');
-      }
+  // Handle simple dispositions (NA, NI, DNC)
+  const handleDisposition = async (disposition: string) => {
+    if (!lead) return;
+
+    try {
+      await api.post('/leads/disposition/', {
+        row_index: lead.row_index,
+        disposition: disposition,
+        extra_data: {}
+      });
+      
+      // Immediately fetch next lead
+      await fetchNextLead();
+    } catch (err) {
+      setError('Failed to update disposition');
     }
   };
 
-  const handleSchedule = () => {
-    const date = prompt('Appointment Date (YYYY-MM-DD)');
-    const time = prompt('Appointment Time (HH:MM)');
-    const notes = prompt('Appointment Notes (optional)');
-    if (date && time) {
-      handleDisposition('BOOK', { Appointment_Date: date, Appointment_Time: time, Appointment_Notes: notes });
+  // Handle Call Back
+  const handleCallBack = () => {
+    setShowCallBackModal(true);
+  };
+
+  const submitCallBack = async () => {
+    if (!callBackDate || !callBackTime) {
+      setError('Please select both date and time for callback');
+      return;
+    }
+
+    try {
+      await api.post('/leads/disposition/', {
+        row_index: lead.row_index,
+        disposition: 'CB',
+        extra_data: {
+          CB_Date: callBackDate,
+          CB_Time: callBackTime
+        }
+      });
+      
+      // Reset form and close modal
+      setCallBackDate('');
+      setCallBackTime('');
+      setShowCallBackModal(false);
+      
+      // Fetch next lead
+      await fetchNextLead();
+    } catch (err) {
+      setError('Failed to schedule callback');
+    }
+  };
+
+  // Handle Book Appointment
+  const handleBookAppointment = () => {
+    setShowBookingModal(true);
+  };
+
+  const submitBooking = async () => {
+    if (!appointmentDate || !appointmentTime) {
+      setError('Please select both date and time for appointment');
+      return;
+    }
+
+    try {
+      await api.post('/leads/disposition/', {
+        row_index: lead.row_index,
+        disposition: 'BOOK',
+        extra_data: {
+          Appointment_Date: appointmentDate,
+          Appointment_Time: appointmentTime,
+          Appointment_Notes: appointmentNotes || ''
+        }
+      });
+      
+      // Reset form and close modal
+      setAppointmentDate('');
+      setAppointmentTime('');
+      setAppointmentNotes('');
+      setShowBookingModal(false);
+      
+      // Show success overlay
+      setShowSuccessOverlay(true);
+      
+      // Auto-hide success overlay and fetch next lead after 2 seconds
+      setTimeout(async () => {
+        setShowSuccessOverlay(false);
+        await fetchNextLead();
+      }, 2000);
+    } catch (err) {
+      setError('Failed to book appointment');
     }
   };
 
@@ -71,42 +152,187 @@ const LeadDetails: React.FC = () => {
     navigate('/login');
   };
 
-  if (!token) return null;
-  if (loading) return <p>Loading...</p>;
+  const makePhoneCall = (phoneNumber: string) => {
+    window.location.href = `tel:${phoneNumber}`;
+  };
+
+  if (loading) {
+    return (
+      <div className="lead-details-container">
+        <div className="loading">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="lead-details-container">
+      {/* Header */}
       <div className="header">
+        <div className="header-left">
+          <h1>RAU Live Lead System</h1>
+          <span className="agent-name">Agent: {agentName}</span>
+        </div>
         <button onClick={handleLogout} className="logout-btn">Logout</button>
-        <span className="agent-name">Agent: {localStorage.getItem('name') || 'Unknown Agent'}</span>
       </div>
-      {error && <p className="error">{error}</p>}
-      <p>Queue Remaining: {queue}</p>
+
+      {/* Error Display */}
+      {error && <div className="error-banner">{error}</div>}
+
+      {/* Queue Counter */}
+      <div className="queue-info">
+        <span>Leads in Queue: {queueCount}</span>
+      </div>
+
+      {/* Lead Display or No Leads Message */}
       {lead ? (
-        <>
-          <h2>{lead['Business Name'] || 'N/A'} - {lead['Phone Number'] || 'N/A'}</h2>
-          <p><strong>Agent Script:</strong> {lead.agent_script || 'No script available'}</p>
-          <p><strong>Lead History:</strong> {lead.history || 'No history'}</p>
-          <button onClick={handleSchedule} className="schedule-btn">Schedule Appointment</button>
-          <div className="disposition-buttons">
-            <button onClick={() => handleDisposition('NA')}>Not Available</button>
-            <button onClick={() => handleDisposition('NI')}>Not Interested</button>
-            <button onClick={() => handleDisposition('DNC')}>Do Not Call</button>
-            <button onClick={() => handleDisposition('CB')}>Call Back</button>
-            <button onClick={() => handleDisposition('BOOK')}>Book Appointment</button>
+        <div className="lead-card">
+          {/* Business Info */}
+          <div className="lead-header">
+            <h2>{lead['Business Name'] || 'N/A'}</h2>
+            <button 
+              className="phone-btn"
+              onClick={() => makePhoneCall(lead['Phone Number'])}
+            >
+              📞 {lead['Phone Number'] || 'N/A'}
+            </button>
           </div>
-          {showPopup && (
-            <div className="popup-overlay" onClick={() => setShowPopup(false)}>
-              <div className="popup-content" onClick={(e) => e.stopPropagation()}>
-                <h3>Appointment Booked Successfully!</h3>
-                <p>Details have been saved.</p>
-                <button onClick={() => setShowPopup(false)}>Close</button>
-              </div>
+
+          {/* Script/Message */}
+          <div className="lead-section">
+            <h3>Script:</h3>
+            <p className="script-text">{lead.Message || lead.message || 'No script available'}</p>
+          </div>
+
+          {/* History/Notes */}
+          {lead['Notes/History'] && (
+            <div className="lead-section">
+              <h3>Lead History:</h3>
+              <p className="history-text">{lead['Notes/History']}</p>
             </div>
           )}
-        </>
+
+          {/* Disposition Buttons */}
+          <div className="disposition-section">
+            <h3>Disposition:</h3>
+            <div className="disposition-buttons">
+              <button 
+                className="disp-btn disp-na"
+                onClick={() => handleDisposition('NA')}
+              >
+                Not Available
+              </button>
+              <button 
+                className="disp-btn disp-ni"
+                onClick={() => handleDisposition('NI')}
+              >
+                Not Interested
+              </button>
+              <button 
+                className="disp-btn disp-dnc"
+                onClick={() => handleDisposition('DNC')}
+              >
+                Do Not Call
+              </button>
+              <button 
+                className="disp-btn disp-cb"
+                onClick={handleCallBack}
+              >
+                Call Back
+              </button>
+              <button 
+                className="disp-btn disp-book"
+                onClick={handleBookAppointment}
+              >
+                📅 Book Appointment
+              </button>
+            </div>
+          </div>
+        </div>
       ) : (
-        <p>No leads available</p>
+        <div className="no-leads">
+          <h2>Waiting patiently for a lead to come in...</h2>
+          <div className="spinner"></div>
+        </div>
+      )}
+
+      {/* Call Back Modal */}
+      {showCallBackModal && (
+        <div className="modal-overlay" onClick={() => setShowCallBackModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Schedule Call Back</h3>
+            <div className="form-group">
+              <label>Date:</label>
+              <input
+                type="date"
+                value={callBackDate}
+                onChange={(e) => setCallBackDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+            <div className="form-group">
+              <label>Time:</label>
+              <input
+                type="time"
+                value={callBackTime}
+                onChange={(e) => setCallBackTime(e.target.value)}
+              />
+            </div>
+            <div className="modal-actions">
+              <button onClick={submitCallBack} className="btn-primary">Schedule</button>
+              <button onClick={() => setShowCallBackModal(false)} className="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Book Appointment Modal */}
+      {showBookingModal && (
+        <div className="modal-overlay" onClick={() => setShowBookingModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Book Appointment</h3>
+            <div className="form-group">
+              <label>Date:</label>
+              <input
+                type="date"
+                value={appointmentDate}
+                onChange={(e) => setAppointmentDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
+              />
+            </div>
+            <div className="form-group">
+              <label>Time:</label>
+              <input
+                type="time"
+                value={appointmentTime}
+                onChange={(e) => setAppointmentTime(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>Notes (optional):</label>
+              <textarea
+                value={appointmentNotes}
+                onChange={(e) => setAppointmentNotes(e.target.value)}
+                rows={3}
+                placeholder="Add any appointment notes..."
+              />
+            </div>
+            <div className="modal-actions">
+              <button onClick={submitBooking} className="btn-primary">Book Appointment</button>
+              <button onClick={() => setShowBookingModal(false)} className="btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success Overlay */}
+      {showSuccessOverlay && (
+        <div className="success-overlay">
+          <div className="success-content">
+            <div className="success-icon">🎉</div>
+            <h2>Appointment Booked Successfully!</h2>
+            <p>Great work!</p>
+          </div>
+        </div>
       )}
     </div>
   );
