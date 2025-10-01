@@ -3,8 +3,18 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import api from '../services/api';
 import './AdminDashboard.css';
 
+interface Agent {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  last_login: string | null;
+  created_at: string;
+}
+
 const AdminDashboard: React.FC = () => {
-  const [agents, setAgents] = useState<any[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [newAgent, setNewAgent] = useState({ name: '', email: '', password: '' });
   const [sheetConfig, setSheetConfig] = useState({ sheet_id: '', tab_name: '' });
   const [message, setMessage] = useState('');
@@ -12,8 +22,15 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'agents' | 'config'>('agents');
   
+  // Edit modal state
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [editForm, setEditForm] = useState({ name: '', email: '' });
+  
+  // Password display state
+  const [agentPasswords, setAgentPasswords] = useState<Record<string, string>>({});
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Fetch agents
   const fetchAgents = async () => {
@@ -74,16 +91,20 @@ const AdminDashboard: React.FC = () => {
       setLoading(true);
       const response = await api.post('/users/', newAgent);
       
-      // Show temp password if generated
+      // Store the password for this agent
       if (response.data.temp_password) {
-        setMessage(`Agent created! Temporary password: ${response.data.temp_password}`);
+        setAgentPasswords(prev => ({
+          ...prev,
+          [response.data.id]: response.data.temp_password
+        }));
+        setMessage(`Agent created! Password: ${response.data.temp_password} (Click "View Password" to see again)`);
       } else {
         setMessage('Agent created successfully!');
       }
       
       setNewAgent({ name: '', email: '', password: '' });
       await fetchAgents();
-      setTimeout(() => setMessage(''), 5000);
+      setTimeout(() => setMessage(''), 8000);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Error creating agent');
       setTimeout(() => setError(''), 3000);
@@ -92,20 +113,103 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Reset password
-  const handleResetPassword = async (userId: string, agentName: string) => {
-    if (!window.confirm(`Reset password for ${agentName}?`)) {
+  // Edit agent - open modal
+  const handleEditClick = (agent: Agent) => {
+    setEditingAgent(agent);
+    setEditForm({ name: agent.name, email: agent.email });
+  };
+
+  // Edit agent - save changes
+  const handleSaveEdit = async () => {
+    if (!editingAgent) return;
+
+    try {
+      setLoading(true);
+      await api.put(`/users/${editingAgent.id}/`, editForm);
+      setMessage(`Agent ${editForm.name} updated successfully!`);
+      setEditingAgent(null);
+      await fetchAgents();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Error updating agent');
+      setTimeout(() => setError(''), 3000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Toggle agent status (activate/deactivate)
+  const handleToggleStatus = async (agent: Agent) => {
+    const action = agent.status === 'active' ? 'deactivate' : 'activate';
+    if (!window.confirm(`Are you sure you want to ${action} ${agent.name}?`)) {
       return;
     }
 
     try {
-      const response = await api.post('/reset-password/', { user_id: userId });
-      setMessage(`Password reset for ${agentName}! New password: ${response.data.temp_password}`);
-      setTimeout(() => setMessage(''), 5000);
+      const response = await api.patch(`/users/${agent.id}/toggle-status/`);
+      setMessage(response.data.message);
+      await fetchAgents();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setError('Error toggling user status');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  // Delete agent
+  const handleDeleteAgent = async (agent: Agent) => {
+    if (!window.confirm(`Are you sure you want to permanently delete ${agent.name}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await api.delete(`/users/${agent.id}/`);
+      setMessage(`Agent ${agent.name} deleted successfully`);
+      
+      // Remove stored password if exists
+      setAgentPasswords(prev => {
+        const newPasswords = { ...prev };
+        delete newPasswords[agent.id];
+        return newPasswords;
+      });
+      
+      await fetchAgents();
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setError('Error deleting agent');
+      setTimeout(() => setError(''), 3000);
+    }
+  };
+
+  // Reset password
+  const handleResetPassword = async (agent: Agent) => {
+    if (!window.confirm(`Reset password for ${agent.name}?`)) {
+      return;
+    }
+
+    try {
+      const response = await api.post('/reset-password/', { user_id: agent.id });
+      
+      // Store the new password
+      setAgentPasswords(prev => ({
+        ...prev,
+        [agent.id]: response.data.temp_password
+      }));
+      
+      setMessage(`Password reset for ${agent.name}! New password: ${response.data.temp_password}`);
+      setTimeout(() => setMessage(''), 8000);
     } catch (err) {
       setError('Error resetting password');
       setTimeout(() => setError(''), 3000);
     }
+  };
+
+  // Toggle password visibility
+  const togglePasswordVisibility = (agentId: string) => {
+    setVisiblePasswords(prev => ({
+      ...prev,
+      [agentId]: !prev[agentId]
+    }));
   };
 
   // Save sheet config
@@ -219,6 +323,7 @@ const AdminDashboard: React.FC = () => {
                     <th>Role</th>
                     <th>Status</th>
                     <th>Last Login</th>
+                    <th>Password</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -243,12 +348,56 @@ const AdminDashboard: React.FC = () => {
                           : 'Never'}
                       </td>
                       <td>
-                        <button
-                          onClick={() => handleResetPassword(agent.id, agent.name)}
-                          className="btn-sm btn-secondary"
-                        >
-                          Reset Password
-                        </button>
+                        {agentPasswords[agent.id] ? (
+                          <div className="password-cell">
+                            <span className="password-display">
+                              {visiblePasswords[agent.id] 
+                                ? agentPasswords[agent.id] 
+                                : '••••••••••••'}
+                            </span>
+                            <button
+                              onClick={() => togglePasswordVisibility(agent.id)}
+                              className="btn-icon"
+                              title={visiblePasswords[agent.id] ? 'Hide password' : 'Show password'}
+                            >
+                              {visiblePasswords[agent.id] ? '🙈' : '👁️'}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-muted">Not available</span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="action-buttons">
+                          <button
+                            onClick={() => handleEditClick(agent)}
+                            className="btn-sm btn-edit"
+                            title="Edit agent"
+                          >
+                            ✏️ Edit
+                          </button>
+                          <button
+                            onClick={() => handleToggleStatus(agent)}
+                            className={`btn-sm ${agent.status === 'active' ? 'btn-warning' : 'btn-success'}`}
+                            title={agent.status === 'active' ? 'Deactivate' : 'Activate'}
+                          >
+                            {agent.status === 'active' ? '⏸️ Deactivate' : '▶️ Activate'}
+                          </button>
+                          <button
+                            onClick={() => handleResetPassword(agent)}
+                            className="btn-sm btn-secondary"
+                            title="Reset password"
+                          >
+                            🔑 Reset Password
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAgent(agent)}
+                            className="btn-sm btn-danger"
+                            title="Delete agent"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -314,6 +463,39 @@ const AdminDashboard: React.FC = () => {
               </ul>
             </div>
           </section>
+        </div>
+      )}
+
+      {/* Edit Agent Modal */}
+      {editingAgent && (
+        <div className="modal-overlay" onClick={() => setEditingAgent(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Edit Agent</h3>
+            <div className="form-group">
+              <label>Name:</label>
+              <input
+                type="text"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Email:</label>
+              <input
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+              />
+            </div>
+            <div className="modal-actions">
+              <button onClick={handleSaveEdit} className="btn-primary" disabled={loading}>
+                {loading ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button onClick={() => setEditingAgent(null)} className="btn-secondary">
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
