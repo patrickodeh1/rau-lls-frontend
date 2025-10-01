@@ -40,7 +40,7 @@ const Login: React.FC = () => {
       <div className="login-box">
         <div className="login-header">
           <h1>RAU Live Lead System</h1>
-          <p>Agent Login</p>
+          <p>Admin or Agent Login</p>
         </div>
         
         <form className="login-form" onSubmit={handleSubmit}>
